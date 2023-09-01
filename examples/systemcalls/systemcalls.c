@@ -1,4 +1,13 @@
 #include "systemcalls.h"
+#include <stdlib.h>
+#define _XOPEN_SOURCE
+#include <stdlib.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+
 
 /**
  * @param cmd the command to execute with system()
@@ -16,8 +25,14 @@ bool do_system(const char *cmd)
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
 */
+    int ret = system(cmd);
 
-    return true;
+    // printf("Ret : %d\n", ret);
+    // printf("WIFSIGNALED: %d\n", WIFSIGNALED(ret));
+    // printf("WIFEXITED: %d\n", WIFEXITED(ret));
+    // printf("WEXITSTATUS: %d\n", WEXITSTATUS(ret));
+     
+    return (WIFEXITED(ret) && (WEXITSTATUS(ret) == 0)) ? true : false;
 }
 
 /**
@@ -47,7 +62,7 @@ bool do_exec(int count, ...)
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
+    // command[count] = command[count];
 
 /*
  * TODO:
@@ -60,6 +75,25 @@ bool do_exec(int count, ...)
 */
 
     va_end(args);
+
+    int status;
+    pid_t pid;
+
+    pid = fork();
+    if (pid == -1) {
+        return false;
+    } else if (pid == 0) {
+        execv(command[0], command);
+        perror("execv");
+        exit(-1);
+    }
+
+    if (waitpid(pid, &status, 0) == -1) {
+        return false;
+    } else if (WIFEXITED(status)) {
+        printf("WIFEXITED: %d %d\n", WIFEXITED(status), WEXITSTATUS(status));
+        return WEXITSTATUS(status) ? false: true;
+    }
 
     return true;
 }
@@ -82,8 +116,7 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
-
+    // command[count] = command[count];
 
 /*
  * TODO
@@ -92,8 +125,39 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
-
     va_end(args);
+
+    int status;
+    pid_t pid;
+
+    int fd = open(outputfile, O_WRONLY | O_TRUNC | O_CREAT, 0644);
+    if (fd < 0) {
+        perror("open");
+        exit(-1);
+    }
+
+    pid = fork();
+    if (pid == -1) {
+        return false;
+    } else if (pid == 0) {
+        if (dup2(fd, 1) < 0) {
+            perror("dup2");
+            exit(-1);
+        }
+        close(fd);
+        execv(command[0], command);
+        perror("execv");
+        exit(-1);
+    } else {
+        close(fd);
+    }
+
+    if (waitpid(pid, &status, 0) == -1) {
+        return false;
+    } else if (WIFEXITED(status)) {
+        printf("WIFEXITED: %d %d\n", WIFEXITED(status), WEXITSTATUS(status));
+        return WEXITSTATUS(status) ? false: true;
+    }
 
     return true;
 }
