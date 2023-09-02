@@ -1,5 +1,4 @@
 PROGS := writer
-CC := $(CROSS_COMPILE)gcc
 
 all: $(PROGS)
 
