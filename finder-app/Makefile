@@ -1,10 +1,10 @@
 PROGS := writer
-CC := $(CROSS_COMPILE)gcc
+# CC := $(CROSS_COMPILE)gcc
 
 all: $(PROGS)
 
 writer: writer.c
-	$(CC) -o $@ $^
+	$(CC) $(CFLAGS) $(INCLUDES) $(OBJS) -o $@ $(LDFLAGS) $^
 
 clean:
 	rm -f *.o
