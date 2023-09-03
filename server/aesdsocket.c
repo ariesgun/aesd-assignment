@@ -34,7 +34,8 @@
 #define BACKLOG 10
 #define MAXDATASIZE 1024 * 1024
 
-bool caught_signal = false;
+static bool caught_signal = false;
+static bool run_in_daemon = false;
 
 void sigchld_handler(int s)
 {
@@ -117,60 +118,11 @@ int read_file(const char* readfile, char* buf) {
     return totalbytes;
 }
 
-int main(int argc, char* argv[]) {
-
-    openlog(NULL, 0, LOG_USER);
-
-    const char* serviceport = "9000";
-    struct addrinfo hints;
-    struct addrinfo *servinfo;
-    int yes = 1;
-
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_PASSIVE;
-
+int run_server(int sockfd) {
+    int new_fd;
     int rc;
-    rc = getaddrinfo(NULL, serviceport, &hints, &servinfo);
-    if (rc != 0) {
-        perror("getaddrinfo");
-        syslog(LOG_ERR, "getaddrinfo failed\n");
-        exit(1);
-    }
 
-    int sockfd, new_fd;
-
-    // Loop through all the results
-    struct addrinfo* p;
-    for (p = servinfo; p != NULL; p=p->ai_next) {
-        sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-        if (sockfd == -1) {
-            perror("server: socket");
-            syslog(LOG_ERR, "socket failed\n");
-            continue;
-        }
-
-        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-            perror("setsockopt");
-            exit(1);
-        }
-
-        rc = bind(sockfd, p->ai_addr, p->ai_addrlen);
-        if (rc == -1) {
-            perror("server: bind");
-            continue;
-        }
-
-        break;
-    }
-    freeaddrinfo(servinfo);
-
-    if (p == NULL) {
-        syslog(LOG_ERR, "server: failed to bind\n");
-        exit(1);
-    }
-
+    printf("Listening\n");
     rc = listen(sockfd, BACKLOG);
     if (rc != 0) {
         perror("listen");
@@ -180,6 +132,7 @@ int main(int argc, char* argv[]) {
 
     // Install signal handler here
     struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
     sa.sa_handler = sigchld_handler; // reap all dead processes
     sigemptyset(&sa.sa_mask);
     if (sigaction(SIGTERM, &sa, NULL) == -1) {
@@ -191,7 +144,7 @@ int main(int argc, char* argv[]) {
         exit(1);
     }
 
-    printf("server: waiting for connection...\n");
+    printf("Waiting for connection request.\n");
 
     char s[INET6_ADDRSTRLEN];
 
@@ -248,6 +201,83 @@ int main(int argc, char* argv[]) {
 
     remove("/var/tmp/aesdsocketdata");
     close(sockfd);
+
+    return 0;
+}
+
+int main(int argc, char* argv[]) {
+
+    openlog(NULL, 0, LOG_USER);
+
+    if ((argc == 2) && (strcmp(argv[1], "-d") == 0)) {
+        run_in_daemon = true;
+    }
+
+    const char* serviceport = "9000";
+    struct addrinfo hints;
+    struct addrinfo *servinfo;
+    int yes = 1;
+
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE;
+
+    int rc;
+    rc = getaddrinfo(NULL, serviceport, &hints, &servinfo);
+    if (rc != 0) {
+        perror("getaddrinfo");
+        syslog(LOG_ERR, "getaddrinfo failed\n");
+        exit(1);
+    }
+
+    int sockfd;
+
+    // Loop through all the results
+    struct addrinfo* p;
+    for (p = servinfo; p != NULL; p=p->ai_next) {
+        sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+        if (sockfd == -1) {
+            perror("server: socket");
+            syslog(LOG_ERR, "socket failed\n");
+            continue;
+        }
+
+        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+            perror("setsockopt");
+            exit(1);
+        }
+
+        rc = bind(sockfd, p->ai_addr, p->ai_addrlen);
+        if (rc == -1) {
+            perror("server: bind");
+            continue;
+        }
+
+        break;
+    }
+    freeaddrinfo(servinfo);
+
+    if (p == NULL) {
+        syslog(LOG_ERR, "server: failed to bind\n");
+        exit(1);
+    }
+
+    if (run_in_daemon) {
+        pid_t pid;
+        pid = fork();
+
+        if (pid == -1) {
+            perror("fork");
+            exit(1);
+        } else if (!pid) {
+            // Child process
+            run_server(sockfd);
+        }
+
+    } else {
+        run_server(sockfd);
+    }
 
     return 0;
 }
