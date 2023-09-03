@@ -6,11 +6,11 @@
 ##############################################################
 
 #TODO: Fill up the contents below in order to reference your assignment 3 git contents
-AESD_ASSIGNMENTS_VERSION = 'ff6b28cdc022d9f39baf9cb245d6fae7c4f391f2'
+AESD_ASSIGNMENTS_VERSION = 212f012282e3c5d8071e7868f494d9ae9369cd0f
 # Note: Be sure to reference the *ssh* repository URL here (not https) to work properly
 # with ssh keys and the automated build/test system.
 # Your site should start with git@github.com:
-AESD_ASSIGNMENTS_SITE = 'git@github.com:ariesgun/aesd-assignment.git'
+AESD_ASSIGNMENTS_SITE = git@github.com:ariesgun/aesd-assignment.git
 AESD_ASSIGNMENTS_SITE_METHOD = git
 AESD_ASSIGNMENTS_GIT_SUBMODULES = YES
 
