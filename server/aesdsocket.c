@@ -80,6 +80,8 @@ int handle_message(const char* writefile, const char* writestr, ssize_t numbytes
         return 1;
     }
 
+    close(fd);
+
     return 0;
 }
 
@@ -114,6 +116,7 @@ int read_file(const char* readfile, char* buf) {
     }
 
     printf("Total bytes %ld\n", totalbytes);
+    close(fd);
 
     return totalbytes;
 }
@@ -169,6 +172,7 @@ int run_server(int sockfd) {
 
         int numbytes;
         char buf[MAXDATASIZE];
+        char read_buf[MAXDATASIZE];
         while (true) {
             numbytes = recv(new_fd, buf, MAXDATASIZE - 1, 0);
             printf("Num bytes : %d\n", numbytes);
@@ -178,25 +182,26 @@ int run_server(int sockfd) {
                 exit(1);
             } else if (numbytes == 0) {
                 close(new_fd);
+                printf("Close connection from %s\n", s);
                 syslog(LOG_INFO, "Closed connection from %s\n", s);
                 break;
-
             } else {
                 printf("Handle message\n");
                 handle_message("/var/tmp/aesdsocketdata", buf, numbytes);
 
-                char read_buf[MAXDATASIZE - 1];
+                memset(read_buf, 0, MAXDATASIZE);
                 ssize_t readbytes = read_file("/var/tmp/aesdsocketdata", read_buf);
                 if (readbytes == -1) {
                     printf("Read error\n");
                 }
 
-                int sentbytes = send(new_fd, read_buf, readbytes, 0);
-                if (sentbytes == -1) {
-                    perror("server: send");
-                    syslog(LOG_ERR, "Send error\n");
+                if (read_buf[readbytes-1] == '\n') {
+                    int sentbytes = send(new_fd, read_buf, readbytes, 0);
+                    if (sentbytes == -1) {
+                        perror("server: send");
+                        syslog(LOG_ERR, "Send error\n");
+                    }
                 }
-
             }
         }
     }
