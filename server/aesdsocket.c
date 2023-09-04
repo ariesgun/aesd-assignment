@@ -153,6 +153,8 @@ int run_server(int sockfd) {
         struct sockaddr their_addr;
 
         addr_size = sizeof their_addr;
+
+        printf("Accepting...\n");
         new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &addr_size);
         if (new_fd == -1) {
             perror("accept");
@@ -199,6 +201,7 @@ int run_server(int sockfd) {
         }
     }
 
+    printf("Removing file\n");
     remove("/var/tmp/aesdsocketdata");
     close(sockfd);
 
