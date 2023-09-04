@@ -8,6 +8,7 @@ on:
 jobs:
     full-test:
         container: cuaesd/aesd-autotest:assignment5-buildroot
+        runs-on: ubuntu-latest
         timeout-minutes: 120
         steps:
           - uses: actions/checkout@v2
