@@ -24,6 +24,12 @@ struct thread_data {
     bool done;
 };
 
+struct timer_thread_data {
+    pthread_mutex_t* mutex;
+    int log_timer_second;
+};
+
+
 struct slist_data_s {
     pthread_t thread_id;
     struct thread_data* params;
