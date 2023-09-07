@@ -12,6 +12,7 @@
 #include <linux/string.h>
 #else
 #include <string.h>
+#include <stdio.h>
 #endif
 
 #include "aesd-circular-buffer.h"
@@ -29,10 +30,26 @@
 struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct aesd_circular_buffer *buffer,
             size_t char_offset, size_t *entry_offset_byte_rtn )
 {
-    /**
-    * TODO: implement per description
-    */
-    return NULL;
+    struct aesd_buffer_entry* datap = NULL;
+    size_t byte_offset = 0;
+    size_t last_offset = (buffer->in_offs <= buffer->out_offs) ? (buffer->in_offs + AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED) : (buffer->in_offs);
+
+    for (size_t off = buffer->out_offs; (off < last_offset); ++off) {
+        printf("Reading offset %ld\n", off);
+        printf("    Offset %ld\n", byte_offset);
+
+        size_t wrapped_off = off % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+
+        if ((byte_offset + buffer->entry[wrapped_off].size) > char_offset) {
+            *entry_offset_byte_rtn = (char_offset - byte_offset);
+            datap = &buffer->entry[wrapped_off];
+            break;
+        }
+        
+        byte_offset += buffer->entry[wrapped_off].size;
+    }
+
+    return datap;
 }
 
 /**
@@ -44,9 +61,24 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 */
 void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
 {
-    /**
-    * TODO: implement per description
-    */
+    if ((buffer == NULL) || (add_entry == NULL)) {
+        return;
+    }
+
+    buffer->entry[buffer->in_offs].buffptr = add_entry->buffptr;
+    buffer->entry[buffer->in_offs].size = add_entry->size;
+
+    if (buffer->in_offs == buffer->out_offs) {
+        buffer->full = true;
+    } else {
+        buffer->full = false;
+    }
+
+    buffer->in_offs = (buffer->in_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+    if (buffer->full) {
+        buffer->out_offs = (buffer->out_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+    }
+    
 }
 
 /**
