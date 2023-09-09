@@ -9,6 +9,7 @@
 #define AESD_CHAR_DRIVER_AESDCHAR_H_
 
 #define AESD_DEBUG 1  //Remove comment on this line to enable debug
+#define MAX_ENTRY_BYTES 2048
 
 #undef PDEBUG             /* undef it, just in case */
 #ifdef AESD_DEBUG
@@ -23,11 +24,16 @@
 #  define PDEBUG(fmt, args...) /* not debugging: nothing */
 #endif
 
+#include "aesd-circular-buffer.h"
+
 struct aesd_dev
 {
     /**
      * TODO: Add structure(s) and locks needed to complete assignment requirements
      */
+    struct aesd_circular_buffer *data; /* Pointer to the circular buffer*/
+    struct aesd_buffer_entry *temp_write; /* Store data until '\n' character is received*/
+    struct mutex lock;
     struct cdev cdev;     /* Char device structure      */
 };
 
