@@ -1,35 +1,9 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <errno.h>
-#include <string.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <arpa/inet.h>
-#include <sys/wait.h>
+#include "aesdsocket.h"
+
 #include <signal.h>
 #include <syslog.h>
-#include <stdbool.h>
+#include <time.h>
 
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
-
-// int socket(int domain, int type, int protocol);
-
-// int bind(int socketfd, const struct sockaddr *addr, socklen_t addrlen);
-// struct sockaddr {
-//     sa_family_t sa_family;
-//     char sa_data[14];
-// }
-// sockaddr_in -> sockaddr or getaddrinfo() -> use this instead.
-
-// int listen(int sockfd, int backlog)
-
-// int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 
 #define BACKLOG 10
 #define MAXDATASIZE 1024 * 1024
@@ -61,6 +35,7 @@ void *get_in_addr(struct sockaddr *sa)
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
+
 int handle_message(const char* writefile, const char* writestr, ssize_t numbytes)
 {
     int fd;
@@ -75,7 +50,7 @@ int handle_message(const char* writefile, const char* writestr, ssize_t numbytes
     if (nr == -1) {
         syslog(LOG_ERR, "Unable to write %s into file: %s", writestr, writefile);
         return 1;
-    } else if (nr != strlen(writestr)) {
+    } else if (nr != numbytes) {
         syslog(LOG_ERR, "Writing %s into file not complete: %s", writestr, writefile);
         return 1;
     }
@@ -118,6 +93,133 @@ int read_file(const char* readfile, char* buf) {
     return totalbytes;
 }
 
+/**
+ * Handles a new connection
+*/
+void* thread_func(void* thread_params)
+{
+    struct thread_data* params = (struct thread_data*) thread_params;
+    if (params == NULL) {
+        syslog(LOG_ERR, "Empty thread params\n");
+    }
+
+    char s[INET6_ADDRSTRLEN];
+
+    struct sockaddr their_addr = params->their_addr;
+    int new_fd = params->new_fd;
+
+    inet_ntop(their_addr.sa_family,
+              get_in_addr((struct sockaddr *)&their_addr),
+              s, sizeof s);
+    printf("server: got connection from %s\n", s);
+    syslog(LOG_INFO, "Accepted connection from %s\n", s);
+
+    int numbytes;
+    char buf[MAXDATASIZE];
+    while (true) {
+        numbytes = recv(new_fd, buf, MAXDATASIZE - 1, 0);
+        printf("Num bytes : %d\n", numbytes);
+        if (numbytes == -1) {
+            perror("recv");
+            close(new_fd);
+            exit(1);
+        } else if (numbytes == 0) {
+            close(new_fd);
+            syslog(LOG_INFO, "Closed connection from %s\n", s);
+            break;
+
+        } else {
+
+            int rc = pthread_mutex_lock(params->mutex);
+            if (rc != 0) {
+                perror("pthread_mutex_lock");
+                syslog(LOG_ERR, "pthread_mutex_lock failed\n");
+                break;
+            } 
+
+            printf("Handle message\n");
+            handle_message("/var/tmp/aesdsocketdata", buf, numbytes);
+
+            char read_buf[MAXDATASIZE - 1];
+            ssize_t readbytes = read_file("/var/tmp/aesdsocketdata", read_buf);
+            if (readbytes == -1) {
+                printf("Read error\n");
+            }
+
+            int sentbytes = send(new_fd, read_buf, readbytes, 0);
+            if (sentbytes == -1) {
+                perror("server: send");
+                syslog(LOG_ERR, "Send error\n");
+            }
+
+            rc = pthread_mutex_unlock(params->mutex);
+            if (rc != 0) {
+                perror("pthread_mutex_unlock");
+                syslog(LOG_ERR, "Unable to unlock mutex");
+            }
+
+        }
+    }
+
+    params->done = true;
+
+    return thread_params;
+}
+
+/**
+ * an extra thread to append timestamp to the log file
+*/
+void* timer_thread(void* thread_params)
+{
+    struct timer_thread_data* thread_func_args = (struct timer_thread_data *) thread_params;
+    if (thread_func_args == NULL) {
+        syslog(LOG_ERR, "Invalid thread params\n");
+        return thread_params;
+    }
+
+    while (true) {
+        
+        sleep(thread_func_args->log_timer_second);
+
+        int rc = pthread_mutex_lock(thread_func_args->mutex);
+        if (rc != 0) {
+            syslog(LOG_ERR, "pthread_mutex_lock failed with %d\n", rc);
+        } else {
+            
+            char outstr[200];
+            time_t t;
+            struct tm *tmp;
+
+            t = time(NULL);
+            tmp = localtime(&t);
+            if (tmp == NULL) {
+                perror("localtime");
+                exit(EXIT_FAILURE);
+            }
+
+            size_t timer_size = strftime(outstr, sizeof(outstr), "timestamp:%Y-%m-%dT%T", tmp);
+            if (timer_size == 0) {
+                fprintf(stderr, "strftime returned 0");
+                exit(EXIT_FAILURE);
+            }
+            outstr[timer_size] = '\n';
+
+            rc = handle_message("/var/tmp/aesdsocketdata", outstr, timer_size + 1);
+                   
+            rc = pthread_mutex_unlock(thread_func_args->mutex);
+            if (rc != 0) {
+                perror("pthread_mutext_unlock");
+                syslog(LOG_ERR, "pthread_mutex_unlock failed with %d\n", rc);
+            }
+        }
+    }
+
+    return thread_params;
+}
+
+/**
+ * Main Thread listening for incoming connections.
+*/
 int run_server(int sockfd) {
     int new_fd;
     int rc;
@@ -146,9 +248,28 @@ int run_server(int sockfd) {
 
     printf("Waiting for connection request.\n");
 
-    char s[INET6_ADDRSTRLEN];
+    pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+    pthread_t thread;
 
-    while(!caught_signal) {
+    struct timer_thread_data* timer_params = malloc(sizeof(struct timer_thread_data));
+    timer_params->mutex = &mutex;
+    timer_params->log_timer_second = 10;
+
+    int rd = pthread_create(&thread, 
+                            NULL,
+                            timer_thread,
+                            timer_params);
+    if (rd != 0) {
+        printf("pthread_create_timer error\n");
+        exit(1);
+    }
+
+    // Init SLIST
+    struct slist_data_s* datap = NULL;
+    SLIST_HEAD(slisthead, slist_data_s) head;
+    SLIST_INIT(&head);
+
+    while (!caught_signal) {
         socklen_t addr_size;
         struct sockaddr their_addr;
 
@@ -159,45 +280,43 @@ int run_server(int sockfd) {
             continue;
         }
 
-        inet_ntop(their_addr.sa_family,
-            get_in_addr((struct sockaddr *)&their_addr),
-            s, sizeof s);
-        printf("server: got connection from %s\n", s);
-        syslog(LOG_INFO, "Accepted connection from %s\n", s);
+        // Spawn a new thread here
+        int rc;
 
-        int numbytes;
-        char buf[MAXDATASIZE];
-        while (true) {
-            numbytes = recv(new_fd, buf, MAXDATASIZE - 1, 0);
-            printf("Num bytes : %d\n", numbytes);
-            if (numbytes == -1) {
-                perror("recv");
-                close(new_fd);
-                exit(1);
-            } else if (numbytes == 0) {
-                close(new_fd);
-                syslog(LOG_INFO, "Closed connection from %s\n", s);
-                break;
+        struct thread_data* params = malloc(sizeof(struct thread_data));
+        params->mutex = &mutex;
+        params->new_fd = new_fd;
+        params->their_addr = their_addr;
 
-            } else {
-                printf("Handle message\n");
-                handle_message("/var/tmp/aesdsocketdata", buf, numbytes);
+        struct slist_data_s* item;
+        item = malloc(sizeof(struct slist_data_s));
+        item->params = params;
+        
+        SLIST_INSERT_HEAD(&head, item, entries);
 
-                char read_buf[MAXDATASIZE - 1];
-                ssize_t readbytes = read_file("/var/tmp/aesdsocketdata", read_buf);
-                if (readbytes == -1) {
-                    printf("Read error\n");
-                }
-
-                int sentbytes = send(new_fd, read_buf, readbytes, 0);
-                if (sentbytes == -1) {
-                    perror("server: send");
-                    syslog(LOG_ERR, "Send error\n");
-                }
-
-            }
+        rc = pthread_create(&(item->thread_id),
+                            NULL,
+                            thread_func,
+                            params);
+        if (rc != 0) {
+            perror("pthread_create");
+            syslog(LOG_ERR, "Unable to create a new thread\n");
         }
     }
+
+    while (!SLIST_EMPTY(&head)) {
+        datap = SLIST_FIRST(&head);
+        pthread_join(datap->thread_id, NULL);
+        SLIST_REMOVE_HEAD(&head, entries);
+        close(datap->params->new_fd);
+        free(datap->params);
+        free(datap);
+    }
+
+    pthread_cancel(thread);
+    pthread_join(thread, NULL);
+    free(timer_params);
+    printf("timer_params free\n");
 
     remove("/var/tmp/aesdsocketdata");
     close(sockfd);
