@@ -138,10 +138,10 @@ void* thread_func(void* thread_params)
             } 
 
             printf("Handle message\n");
-            handle_message("/var/tmp/aesdsocketdata", buf, numbytes);
+            handle_message(FILE_DESTINATION_PATH, buf, numbytes);
 
             char read_buf[MAXDATASIZE - 1];
-            ssize_t readbytes = read_file("/var/tmp/aesdsocketdata", read_buf);
+            ssize_t readbytes = read_file(FILE_DESTINATION_PATH, read_buf);
             if (readbytes == -1) {
                 printf("Read error\n");
             }
@@ -162,57 +162,6 @@ void* thread_func(void* thread_params)
     }
 
     params->done = true;
-
-    return thread_params;
-}
-
-/**
- * an extra thread to append timestamp to the log file
-*/
-void* timer_thread(void* thread_params)
-{
-    struct timer_thread_data* thread_func_args = (struct timer_thread_data *) thread_params;
-    if (thread_func_args == NULL) {
-        syslog(LOG_ERR, "Invalid thread params\n");
-        return thread_params;
-    }
-
-    while (true) {
-        
-        sleep(thread_func_args->log_timer_second);
-
-        int rc = pthread_mutex_lock(thread_func_args->mutex);
-        if (rc != 0) {
-            syslog(LOG_ERR, "pthread_mutex_lock failed with %d\n", rc);
-        } else {
-            
-            char outstr[200];
-            time_t t;
-            struct tm *tmp;
-
-            t = time(NULL);
-            tmp = localtime(&t);
-            if (tmp == NULL) {
-                perror("localtime");
-                exit(EXIT_FAILURE);
-            }
-
-            size_t timer_size = strftime(outstr, sizeof(outstr), "timestamp:%Y-%m-%dT%T", tmp);
-            if (timer_size == 0) {
-                fprintf(stderr, "strftime returned 0");
-                exit(EXIT_FAILURE);
-            }
-            outstr[timer_size] = '\n';
-
-            rc = handle_message("/var/tmp/aesdsocketdata", outstr, timer_size + 1);
-                   
-            rc = pthread_mutex_unlock(thread_func_args->mutex);
-            if (rc != 0) {
-                perror("pthread_mutext_unlock");
-                syslog(LOG_ERR, "pthread_mutex_unlock failed with %d\n", rc);
-            }
-        }
-    }
 
     return thread_params;
 }
@@ -249,20 +198,10 @@ int run_server(int sockfd) {
     printf("Waiting for connection request.\n");
 
     pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-    pthread_t thread;
 
     struct timer_thread_data* timer_params = malloc(sizeof(struct timer_thread_data));
     timer_params->mutex = &mutex;
     timer_params->log_timer_second = 10;
-
-    int rd = pthread_create(&thread, 
-                            NULL,
-                            timer_thread,
-                            timer_params);
-    if (rd != 0) {
-        printf("pthread_create_timer error\n");
-        exit(1);
-    }
 
     // Init SLIST
     struct slist_data_s* datap = NULL;
@@ -313,12 +252,6 @@ int run_server(int sockfd) {
         free(datap);
     }
 
-    pthread_cancel(thread);
-    pthread_join(thread, NULL);
-    free(timer_params);
-    printf("timer_params free\n");
-
-    remove("/var/tmp/aesdsocketdata");
     close(sockfd);
 
     return 0;

@@ -17,6 +17,8 @@
 
 #include <pthread.h>
 
+#define FILE_DESTINATION_PATH "/dev/aesdchar"
+
 struct thread_data {
     struct sockaddr their_addr;
     int new_fd;
