@@ -63,11 +63,14 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     struct aesd_circular_buffer *dev_buffer = dev->data;
     size_t entry_offset_byte_rtn;
 
+    if (mutex_lock_interruptible(&dev->lock))
+        return -ERESTARTSYS;
+
     entry = aesd_circular_buffer_find_entry_offset_for_fpos(dev_buffer, *f_pos, &entry_offset_byte_rtn);
     PDEBUG("offset %lld\n", entry_offset_byte_rtn);
 
     if (entry == NULL) {
-        return retval;
+        goto out;
     }
     PDEBUG("read %lld size\n", entry->size);
     
@@ -79,12 +82,15 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     }
 
     if (copy_to_user(buf, entry->buffptr + entry_offset_byte_rtn, count)) {
-        return -EFAULT;
+        retval = -EFAULT;
+        goto out;
     }
 
     *f_pos += entry->size;
     retval += entry->size;
 
+out:
+    mutex_unlock(&dev->lock);
     return retval;
 }
 
@@ -101,10 +107,14 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
      */
     struct aesd_buffer_entry* entry;
 
+    if (mutex_lock_interruptible(&dev->lock))
+        return -ERESTARTSYS;
+
     if (dev->temp_write == NULL) {
         entry = kmalloc(sizeof(struct aesd_buffer_entry), GFP_KERNEL);
         if (!entry) {
-            return -ENOMEM;
+            retval = -ENOMEM;
+            goto out;
         }
         entry->size = 0;
         entry->buffptr = kmalloc(sizeof(char) * MAX_ENTRY_BYTES, GFP_KERNEL);
@@ -118,7 +128,8 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     PDEBUG("size %zu bytes with offset %lld %lld", count, entry->size, sizeof(char));
 
     if (copy_from_user(entry->buffptr + entry->size, buf, count)) {
-        return -EFAULT;
+        retval = -EFAULT;
+        goto out;
     }
     entry->size += count;
 
@@ -131,6 +142,9 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     }
 
     retval = count;
+
+out:
+    mutex_unlock(&dev->lock);
     return retval;
 }
 struct file_operations aesd_fops = {
