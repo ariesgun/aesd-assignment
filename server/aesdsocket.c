@@ -90,6 +90,8 @@ int read_file(const char* readfile, char* buf) {
 
     printf("Total bytes %ld\n", totalbytes);
 
+    close(fd);
+
     return totalbytes;
 }
 
@@ -138,26 +140,95 @@ void* thread_func(void* thread_params)
             } 
 
             printf("Handle message\n");
-            handle_message(FILE_DESTINATION_PATH, buf, numbytes);
+            char cmd[MAXDATASIZE];
+            char sep;
+            int x, y;
+            sscanf(buf, "AESDCHAR_IOCSEEKTO:%d,%d", &x, &y);
+            
+            if (strstr(buf, "AESDCHAR_IOCSEEKTO:") != NULL) {
 
-            char read_buf[MAXDATASIZE - 1];
-            ssize_t readbytes = read_file(FILE_DESTINATION_PATH, read_buf);
-            if (readbytes == -1) {
-                printf("Read error\n");
+                printf("handle seek");
+
+                int fd;
+                fd = open(FILE_DESTINATION_PATH, O_RDWR | O_CREAT | O_APPEND, 0666);
+                if (fd == -1) {
+                    syslog(LOG_ERR, "Unable to create file: %s", FILE_DESTINATION_PATH);
+                    return 1;
+                }
+
+                struct aesd_seekto seekto;
+                seekto.write_cmd = x;
+                seekto.write_cmd_offset = y;
+                int ret = ioctl(fd, AESDCHAR_IOCSEEKTO, &seekto);
+
+                if (ret != 0) {
+                    syslog(LOG_ERR, "Unable to perform iotctl on file: %s", FILE_DESTINATION_PATH);
+                    close(fd);
+                    return 1;
+                }
+
+                char buf[MAXDATASIZE - 1];
+                char* read_buf = buf;
+
+                ssize_t len = MAXDATASIZE;
+                ssize_t totalbytes = 0;
+
+                while (len >= 0 && (ret = read(fd, read_buf, len)) != 0) {
+                    if (ret == -1) {
+                        if (errno == EINTR) {
+                            continue;
+                        }
+                        perror("read");
+                        break;
+                    } else if (ret == 0) {
+                        break;
+                    }
+
+                    len -= ret;
+                    read_buf += ret;
+                    totalbytes += ret;
+                }
+
+                printf("Total bytes %ld\n", totalbytes);
+
+                int sentbytes = send(new_fd, buf, totalbytes, 0);
+                if (sentbytes == -1) {
+                    perror("server: send");
+                    syslog(LOG_ERR, "Send error\n");
+                }
+
+                close(fd);
+
+                rc = pthread_mutex_unlock(params->mutex);
+                if (rc != 0) {
+                    perror("pthread_mutex_unlock");
+                    syslog(LOG_ERR, "Unable to unlock mutex");
+                }
+
+                break;
+
+            } else {
+
+                handle_message(FILE_DESTINATION_PATH, buf, numbytes);
+
+                char read_buf[MAXDATASIZE - 1];
+                ssize_t readbytes = read_file(FILE_DESTINATION_PATH, read_buf);
+                if (readbytes == -1) {
+                    printf("Read error\n");
+                }
+
+                int sentbytes = send(new_fd, read_buf, readbytes, 0);
+                if (sentbytes == -1) {
+                    perror("server: send");
+                    syslog(LOG_ERR, "Send error\n");
+                }
+
+                rc = pthread_mutex_unlock(params->mutex);
+                if (rc != 0) {
+                    perror("pthread_mutex_unlock");
+                    syslog(LOG_ERR, "Unable to unlock mutex");
+                }
             }
-
-            int sentbytes = send(new_fd, read_buf, readbytes, 0);
-            if (sentbytes == -1) {
-                perror("server: send");
-                syslog(LOG_ERR, "Send error\n");
-            }
-
-            rc = pthread_mutex_unlock(params->mutex);
-            if (rc != 0) {
-                perror("pthread_mutex_unlock");
-                syslog(LOG_ERR, "Unable to unlock mutex");
-            }
-
         }
     }
 

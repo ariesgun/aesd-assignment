@@ -16,6 +16,7 @@
 #include <netinet/in.h>
 
 #include <pthread.h>
+#include "aesd_ioctl.h"
 
 #define FILE_DESTINATION_PATH "/dev/aesdchar"
 

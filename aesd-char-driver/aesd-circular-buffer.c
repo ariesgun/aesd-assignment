@@ -51,6 +51,31 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
     return datap;
 }
 
+struct aesd_buffer_entry * aesd_circular_buffer_find_entry_offset_for_fpos_seek(struct aesd_circular_buffer *buffer,
+            size_t item_offset, size_t *entry_offset)
+{
+    struct aesd_buffer_entry* datap = buffer->entry;
+    size_t output = 0;
+    size_t byte_offset = 0;
+    size_t last_offset = (buffer->full) ? (buffer->in_offs + AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED) : (buffer->in_offs);
+
+    size_t off = buffer->out_offs;
+    size_t idx = 0;
+    for (idx = item_offset; idx > 0; --idx) {
+
+        size_t wrapped_off = off % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+
+        datap = &buffer->entry[wrapped_off];
+        output += datap->size;
+
+        off++;
+    }
+
+    *entry_offset = output;
+
+    return datap;
+}
+
 /**
 * Adds entry @param add_entry to @param buffer in the location specified in buffer->in_offs.
 * If the buffer was already full, overwrites the oldest entry and advances buffer->out_offs to the
