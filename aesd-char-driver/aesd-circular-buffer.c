@@ -56,8 +56,7 @@ struct aesd_buffer_entry * aesd_circular_buffer_find_entry_offset_for_fpos_seek(
 {
     struct aesd_buffer_entry* datap = buffer->entry;
     size_t output = 0;
-    size_t byte_offset = 0;
-    size_t last_offset = (buffer->full) ? (buffer->in_offs + AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED) : (buffer->in_offs);
+    //size_t last_offset = (buffer->full) ? (buffer->in_offs + AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED) : (buffer->in_offs);
 
     size_t off = buffer->out_offs;
     size_t idx = 0;
